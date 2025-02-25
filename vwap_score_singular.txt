@@ -1,0 +1,118 @@
+//@version=5
+//@143gojo --- dm me if you have questions or bug fixes (i probably won't fix them but you can try)
+indicator("VWAP Score", overlay=true)
+
+// ----------------------------------------------------
+// user inputs 
+// ----------------------------------------------------
+
+// table position
+var string gp2 = "display"
+string table_y_pos = input.string("top", "vertical position", options=["top", "middle", "bottom"], group=gp2)
+string table_x_pos = input.string("right", "horizontal position", options=["left", "center", "right"], group=gp2)
+var table dashboard = table.new(table_y_pos + "_" + table_x_pos, 7, 41, border_width=1)
+color_positive = input.color(color.green, "Positive Color")
+color_negative = input.color(color.red, "Negative Color")
+color_neutral = input.color(color.gray, "Neutral Color")
+color_text = input.color(color.white, "Text Color")
+color_header_bg = input.color(color.rgb(39, 39, 39), "Header Background")
+
+// adjustable params
+var string gp3 = "weights"
+y_weight    = input.float(1.0, "Yearly Weight", tooltip="higher value = higher impact on trend score by the yearly VWAP/VAH/VAL", group=gp3)
+q_weight    = input.float(1.0, "Quarterly Weight", tooltip="higher value = higher impact on trend score by the quarterly VWAP/VAH/VAL", group=gp3)
+m_weight    = input.float(1.0, "Monthly Weight", tooltip="higher value = higher impact on trend score by the monthly VWAP/VAH/VAL", group=gp3)
+w_weight    = input.float(1.0, "Weekly Weight", tooltip="higher value = higher impact on trend score by the weekly VWAP/VAH/VAL", group=gp3)
+std_weight  = input.float(1.0, "Current VAH/VAL Weight", tooltip="bonus/penalty for price being above/below the current VAH/VAL", group=gp3)
+prev_weight = input.float(1.0, "Previous VAH/VAL Weight", tooltip="bonus/penalty for price being above/below the previous VWAP/VAH/VAL", group=gp3)
+
+calculate_vwap(timeframe, prefix) =>
+    t = time(timeframe)
+    start = na(t[1]) or t > t[1]
+    
+    pvwap = float(na), pupper = float(na), plower = float(na)
+    
+    [vwap, upper, lower] = ta.vwap(close, start, 1.0)
+    
+    if start
+        pvwap := vwap[1]
+        pupper := upper[1]
+        plower := lower[1]
+    else
+        pvwap := pvwap[1]
+        pupper := pupper[1]
+        plower := plower[1]
+    
+    [vwap, upper, lower, pvwap, pupper, plower]
+
+[d_vwap, d_vah, d_val, d_prev_vwap, d_prev_vah, d_prev_val] = calculate_vwap("1D", "d")
+[w_vwap, w_vah, w_val, w_prev_vwap, w_prev_vah, w_prev_val] = calculate_vwap("1W", "w")
+[m_vwap, m_vah, m_val, m_prev_vwap, m_prev_vah, m_prev_val] = calculate_vwap("1M", "m")
+[q_vwap, q_vah, q_val, q_prev_vwap, q_prev_vah, q_prev_val] = calculate_vwap("3M", "q")
+[y_vwap, y_vah, y_val, y_prev_vwap, y_prev_vah, y_prev_val] = calculate_vwap("12M", "y")
+
+calculate_period_score(price, vwap, vah, val, prev_vwap, prev_vah, prev_val, weight) =>
+    float score = 0.0
+    
+    if not na(vwap)
+        vwap_distance = (price - vwap) / vwap
+        score += weight * vwap_distance
+        
+        if price > vah
+            score += std_weight * weight
+        if price < val
+            score -= std_weight * weight
+    
+    if not na(prev_vwap)
+        prev_vwap_distance = (price - prev_vwap) / prev_vwap
+        score += weight * prev_weight * prev_vwap_distance
+        
+        if price > prev_vah
+            score += std_weight * weight * prev_weight
+        if price < prev_val
+            score -= std_weight * weight * prev_weight
+    
+    score
+
+get_color_for_value(value) =>
+    color bg = na
+
+    if value > 0
+        bg := color.new(color_positive, 70)
+    else if value < 0
+        bg := color.new(color_negative, 70)
+    else
+        bg := color.new(color_neutral, 90)
+
+    bg
+
+if barstate.islast
+    table.cell(dashboard, 0, 0, "TICKER", bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 1, 0, "SCORE", bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 2, 0, "PRICE",  bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 3, 0, "ΔWVWAP", bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 4, 0, "ΔMVWAP", bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 5, 0, "ΔQVWAP", bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 6, 0, "ΔYVWAP", bgcolor=color_header_bg, text_color=color_text)
+    
+    w_score = calculate_period_score(close, w_vwap, w_vah, w_val, w_prev_vwap, w_prev_vah, w_prev_val, w_weight)
+    m_score = calculate_period_score(close, m_vwap, m_vah, m_val, m_prev_vwap, m_prev_vah, m_prev_val, m_weight)
+    q_score = calculate_period_score(close, q_vwap, q_vah, q_val, q_prev_vwap, q_prev_vah, q_prev_val, q_weight)
+    y_score = calculate_period_score(close, y_vwap, y_vah, y_val, y_prev_vwap, y_prev_vah, y_prev_val, y_weight)
+    
+    total_score = w_score + m_score + q_score + y_score
+    max_score = (w_weight + m_weight + q_weight + y_weight) * (1 + std_weight + prev_weight)
+    normalized_score = (total_score / max_score) * 100  // now -100 to +100
+
+    w_pct = not na(w_vwap) ? ((close/w_vwap - 1) * 100) : na
+    m_pct = not na(m_vwap) ? ((close/m_vwap - 1) * 100) : na
+    q_pct = not na(q_vwap) ? ((close/q_vwap - 1) * 100) : na
+    y_pct = not na(y_vwap) ? ((close/y_vwap - 1) * 100) : na
+
+    table.cell(dashboard, 0, 1, syminfo.ticker, text_color=color.white)
+    table.cell(dashboard, 1, 1, str.tostring(normalized_score, "#.##"), bgcolor=get_color_for_value(normalized_score), text_color=color.white)
+    table.cell(dashboard, 2, 1, str.tostring(close, "#.####"), text_color=color.white)
+    table.cell(dashboard, 3, 1, str.tostring(w_pct, "#.##") + "%", bgcolor=get_color_for_value(w_pct), text_color=color.white)
+    table.cell(dashboard, 4, 1, str.tostring(m_pct, "#.##") + "%", bgcolor=get_color_for_value(m_pct), text_color=color.white)
+    table.cell(dashboard, 5, 1, str.tostring(q_pct, "#.##") + "%", bgcolor=get_color_for_value(q_pct), text_color=color.white)
+    table.cell(dashboard, 6, 1, str.tostring(y_pct, "#.##") + "%", bgcolor=get_color_for_value(y_pct), text_color=color.white)

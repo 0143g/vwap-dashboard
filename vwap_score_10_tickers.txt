@@ -1,0 +1,437 @@
+//@version=6
+//@143gojo -- dm me if you have questions or bug fixes (i probably won't fix them but you can try)
+indicator("VWAP Dashboard (10)", overlay=true)
+
+// ----------------------------------------------------
+// user inputs 
+// ----------------------------------------------------
+
+// table position
+var string gp2 = "display"
+string table_y_pos = input.string("top", "vertical position", options=["top", "middle", "bottom"], group=gp2)
+string table_x_pos = input.string("right", "horizontal position", options=["left", "center", "right"], group=gp2)
+var table dashboard = table.new(table_y_pos + "_" + table_x_pos, 7, 11, border_width=1)
+color_positive = input.color(color.green, "Positive Color")
+color_negative = input.color(color.red, "Negative Color")
+color_neutral = input.color(color.gray, "Neutral Color")
+color_text = input.color(color.white, "Text Color")
+color_header_bg = input.color(color.rgb(39, 39, 39), "Header Background")
+
+// adjustable params
+var string gp3 = "weights"
+y_weight    = input.float(1.0, "Yearly Weight", tooltip="higher value = higher impact on trend score by the yearly VWAP/VAH/VAL", group=gp3)
+q_weight    = input.float(1.0, "Quarterly Weight", tooltip="higher value = higher impact on trend score by the quarterly VWAP/VAH/VAL", group=gp3)
+m_weight    = input.float(1.0, "Monthly Weight", tooltip="higher value = higher impact on trend score by the monthly VWAP/VAH/VAL", group=gp3)
+w_weight    = input.float(1.0, "Weekly Weight", tooltip="higher value = higher impact on trend score by the weekly VWAP/VAH/VAL", group=gp3)
+std_weight  = input.float(1.0, "Current VAH/VAL Weight", tooltip="bonus/penalty for price being above/below the current VAH/VAL", group=gp3)
+prev_weight = input.float(1.0, "Previous VAH/VAL Weight", tooltip="bonus/penalty for price being above/below the previous VWAP/VAH/VAL", group=gp3)
+
+// number of symbols to display
+var string gp4 = "symbols"
+maxSymbolsToShow = input.int(defval=5, title="number of symbols to display (2-10)", minval=2, maxval=10, tooltip="the table will take a while to load initially, pinescript sucks sorry bros.", group=gp4)
+
+// up to 10 symbol inputs, default all to btc
+s01 = input.symbol("BINANCE:BTCUSDT.P", "symbol 1", group=gp4)
+s02 = input.symbol("BINANCE:BTCUSDT.P", "symbol 2", group=gp4)
+s03 = input.symbol("BINANCE:BTCUSDT.P", "symbol 3", group=gp4)
+s04 = input.symbol("BINANCE:BTCUSDT.P", "symbol 4", group=gp4)
+s05 = input.symbol("BINANCE:BTCUSDT.P", "symbol 5", group=gp4)
+s06 = input.symbol("BINANCE:BTCUSDT.P", "symbol 6", group=gp4)
+s07 = input.symbol("BINANCE:BTCUSDT.P", "symbol 7", group=gp4)
+s08 = input.symbol("BINANCE:BTCUSDT.P", "symbol 8", group=gp4)
+s09 = input.symbol("BINANCE:BTCUSDT.P", "symbol 9", group=gp4)
+s10 = input.symbol("BINANCE:BTCUSDT.P", "symbol 10", group=gp4)
+
+// ----------------------------------------------------
+// helper funcs
+// ----------------------------------------------------
+
+calculate_vwap(tf, prefix, close_val) =>
+    t = time(tf)
+    start = na(t[1]) or t > t[1]
+    pvwap  = float(na)
+    pupper = float(na)
+    plower = float(na)
+    [vwap, upper, lower] = ta.vwap(close_val, start, 1.0)
+
+    if start
+        pvwap  := vwap[1]
+        pupper := upper[1]
+        plower := lower[1]
+    else
+        pvwap  := pvwap[1]
+        pupper := pupper[1]
+        plower := plower[1]
+
+    [vwap, upper, lower, pvwap, pupper, plower]
+
+calculate_period_score(price, vwap, vah, val, prev_vwap, prev_vah, prev_val, weight) =>
+    float score = 0.0
+
+    if not na(vwap)
+        vwap_distance = (price - vwap) / vwap
+        score += weight * vwap_distance
+
+        if price > vah
+            score += std_weight * weight
+        if price < val
+            score -= std_weight * weight
+
+    if not na(prev_vwap)
+        prev_vwap_distance = (price - prev_vwap) / prev_vwap
+        score += weight * prev_weight * prev_vwap_distance
+
+        if price > prev_vah
+            score += prev_weight * weight
+        if price < prev_val
+            score -= prev_weight * weight
+
+    score
+
+get_color_for_value(value) =>
+    color bg = na
+
+    if value > 0
+        bg := color.new(color_positive, 70)
+    else if value < 0
+        bg := color.new(color_negative, 70)
+    else
+        bg := color.new(color_neutral, 90)
+
+    bg
+
+// ----------------------------------------------------
+// the rest of the script is probably some of the worst
+// shit that i've ever had the misfortune of writing.
+// it's actualy disgusting, but it works, barely.
+// there is no dynamic variable naming in pinescript
+// as far as i can tell, so you quite literally have to
+// define everything upfront, then only display as much
+// as you want to. shit is retarded. gl fixing it lol.
+// ----------------------------------------------------
+
+// do the separate security calls for each of the 10
+c01 = request.security(s01, timeframe.period, close)
+c02 = request.security(s02, timeframe.period, close)
+c03 = request.security(s03, timeframe.period, close)
+c04 = request.security(s04, timeframe.period, close)
+c05 = request.security(s05, timeframe.period, close)
+c06 = request.security(s06, timeframe.period, close)
+c07 = request.security(s07, timeframe.period, close)
+c08 = request.security(s08, timeframe.period, close)
+c09 = request.security(s09, timeframe.period, close)
+c10 = request.security(s10, timeframe.period, close)
+
+// weekly vwap calcs
+[w_vwap01, w_vah01, w_val01, w_prev_vwap01, w_prev_vah01, w_prev_val01] = calculate_vwap("1W", "w", c01)
+[w_vwap02, w_vah02, w_val02, w_prev_vwap02, w_prev_vah02, w_prev_val02] = calculate_vwap("1W", "w", c02)
+[w_vwap03, w_vah03, w_val03, w_prev_vwap03, w_prev_vah03, w_prev_val03] = calculate_vwap("1W", "w", c03)
+[w_vwap04, w_vah04, w_val04, w_prev_vwap04, w_prev_vah04, w_prev_val04] = calculate_vwap("1W", "w", c04)
+[w_vwap05, w_vah05, w_val05, w_prev_vwap05, w_prev_vah05, w_prev_val05] = calculate_vwap("1W", "w", c05)
+[w_vwap06, w_vah06, w_val06, w_prev_vwap06, w_prev_vah06, w_prev_val06] = calculate_vwap("1W", "w", c06)
+[w_vwap07, w_vah07, w_val07, w_prev_vwap07, w_prev_vah07, w_prev_val07] = calculate_vwap("1W", "w", c07)
+[w_vwap08, w_vah08, w_val08, w_prev_vwap08, w_prev_vah08, w_prev_val08] = calculate_vwap("1W", "w", c08)
+[w_vwap09, w_vah09, w_val09, w_prev_vwap09, w_prev_vah09, w_prev_val09] = calculate_vwap("1W", "w", c09)
+[w_vwap10, w_vah10, w_val10, w_prev_vwap10, w_prev_vah10, w_prev_val10] = calculate_vwap("1W", "w", c10)
+
+// monthly vwap calcs
+[m_vwap01, m_vah01, m_val01, m_prev_vwap01, m_prev_vah01, m_prev_val01] = calculate_vwap("1M", "m", c01)
+[m_vwap02, m_vah02, m_val02, m_prev_vwap02, m_prev_vah02, m_prev_val02] = calculate_vwap("1M", "m", c02)
+[m_vwap03, m_vah03, m_val03, m_prev_vwap03, m_prev_vah03, m_prev_val03] = calculate_vwap("1M", "m", c03)
+[m_vwap04, m_vah04, m_val04, m_prev_vwap04, m_prev_vah04, m_prev_val04] = calculate_vwap("1M", "m", c04)
+[m_vwap05, m_vah05, m_val05, m_prev_vwap05, m_prev_vah05, m_prev_val05] = calculate_vwap("1M", "m", c05)
+[m_vwap06, m_vah06, m_val06, m_prev_vwap06, m_prev_vah06, m_prev_val06] = calculate_vwap("1M", "m", c06)
+[m_vwap07, m_vah07, m_val07, m_prev_vwap07, m_prev_vah07, m_prev_val07] = calculate_vwap("1M", "m", c07)
+[m_vwap08, m_vah08, m_val08, m_prev_vwap08, m_prev_vah08, m_prev_val08] = calculate_vwap("1M", "m", c08)
+[m_vwap09, m_vah09, m_val09, m_prev_vwap09, m_prev_vah09, m_prev_val09] = calculate_vwap("1M", "m", c09)
+[m_vwap10, m_vah10, m_val10, m_prev_vwap10, m_prev_vah10, m_prev_val10] = calculate_vwap("1M", "m", c10)
+
+// quarterly vwap calcs
+[q_vwap01, q_vah01, q_val01, q_prev_vwap01, q_prev_vah01, q_prev_val01] = calculate_vwap("3M", "q", c01)
+[q_vwap02, q_vah02, q_val02, q_prev_vwap02, q_prev_vah02, q_prev_val02] = calculate_vwap("3M", "q", c02)
+[q_vwap03, q_vah03, q_val03, q_prev_vwap03, q_prev_vah03, q_prev_val03] = calculate_vwap("3M", "q", c03)
+[q_vwap04, q_vah04, q_val04, q_prev_vwap04, q_prev_vah04, q_prev_val04] = calculate_vwap("3M", "q", c04)
+[q_vwap05, q_vah05, q_val05, q_prev_vwap05, q_prev_vah05, q_prev_val05] = calculate_vwap("3M", "q", c05)
+[q_vwap06, q_vah06, q_val06, q_prev_vwap06, q_prev_vah06, q_prev_val06] = calculate_vwap("3M", "q", c06)
+[q_vwap07, q_vah07, q_val07, q_prev_vwap07, q_prev_vah07, q_prev_val07] = calculate_vwap("3M", "q", c07)
+[q_vwap08, q_vah08, q_val08, q_prev_vwap08, q_prev_vah08, q_prev_val08] = calculate_vwap("3M", "q", c08)
+[q_vwap09, q_vah09, q_val09, q_prev_vwap09, q_prev_vah09, q_prev_val09] = calculate_vwap("3M", "q", c09)
+[q_vwap10, q_vah10, q_val10, q_prev_vwap10, q_prev_vah10, q_prev_val10] = calculate_vwap("3M", "q", c10)
+
+// yearly vwap calcs
+[y_vwap01, y_vah01, y_val01, y_prev_vwap01, y_prev_vah01, y_prev_val01] = calculate_vwap("12M", "y", c01)
+[y_vwap02, y_vah02, y_val02, y_prev_vwap02, y_prev_vah02, y_prev_val02] = calculate_vwap("12M", "y", c02)
+[y_vwap03, y_vah03, y_val03, y_prev_vwap03, y_prev_vah03, y_prev_val03] = calculate_vwap("12M", "y", c03)
+[y_vwap04, y_vah04, y_val04, y_prev_vwap04, y_prev_vah04, y_prev_val04] = calculate_vwap("12M", "y", c04)
+[y_vwap05, y_vah05, y_val05, y_prev_vwap05, y_prev_vah05, y_prev_val05] = calculate_vwap("12M", "y", c05)
+[y_vwap06, y_vah06, y_val06, y_prev_vwap06, y_prev_vah06, y_prev_val06] = calculate_vwap("12M", "y", c06)
+[y_vwap07, y_vah07, y_val07, y_prev_vwap07, y_prev_vah07, y_prev_val07] = calculate_vwap("12M", "y", c07)
+[y_vwap08, y_vah08, y_val08, y_prev_vwap08, y_prev_vah08, y_prev_val08] = calculate_vwap("12M", "y", c08)
+[y_vwap09, y_vah09, y_val09, y_prev_vwap09, y_prev_vah09, y_prev_val09] = calculate_vwap("12M", "y", c09)
+[y_vwap10, y_vah10, y_val10, y_prev_vwap10, y_prev_vah10, y_prev_val10] = calculate_vwap("12M", "y", c10)
+
+// create arrays for storage
+var string[] symbol_arr       = array.new_string(10)
+var float[] close_arr         = array.new_float(10, na)
+
+// weekly
+var float[] w_vwap_arr        = array.new_float(10, na)
+var float[] w_vah_arr         = array.new_float(10, na)
+var float[] w_val_arr         = array.new_float(10, na)
+var float[] w_prev_vwap_arr   = array.new_float(10, na)
+var float[] w_prev_vah_arr    = array.new_float(10, na)
+var float[] w_prev_val_arr    = array.new_float(10, na)
+
+// monthly
+var float[] m_vwap_arr        = array.new_float(10, na)
+var float[] m_vah_arr         = array.new_float(10, na)
+var float[] m_val_arr         = array.new_float(10, na)
+var float[] m_prev_vwap_arr   = array.new_float(10, na)
+var float[] m_prev_vah_arr    = array.new_float(10, na)
+var float[] m_prev_val_arr    = array.new_float(10, na)
+
+// quarterly
+var float[] q_vwap_arr        = array.new_float(10, na)
+var float[] q_vah_arr         = array.new_float(10, na)
+var float[] q_val_arr         = array.new_float(10, na)
+var float[] q_prev_vwap_arr   = array.new_float(10, na)
+var float[] q_prev_vah_arr    = array.new_float(10, na)
+var float[] q_prev_val_arr    = array.new_float(10, na)
+
+// yearly
+var float[] y_vwap_arr        = array.new_float(10, na)
+var float[] y_vah_arr         = array.new_float(10, na)
+var float[] y_val_arr         = array.new_float(10, na)
+var float[] y_prev_vwap_arr   = array.new_float(10, na)
+var float[] y_prev_vah_arr    = array.new_float(10, na)
+var float[] y_prev_val_arr    = array.new_float(10, na)
+
+if barstate.isfirst
+    array.set(symbol_arr, 0, s01)
+    array.set(symbol_arr, 1, s02)
+    array.set(symbol_arr, 2, s03)
+    array.set(symbol_arr, 3, s04)
+    array.set(symbol_arr, 4, s05)
+    array.set(symbol_arr, 5, s06)
+    array.set(symbol_arr, 6, s07)
+    array.set(symbol_arr, 7, s08)
+    array.set(symbol_arr, 8, s09)
+    array.set(symbol_arr, 9, s10)
+
+if barstate.islast
+    array.set(close_arr, 0, c01)
+    array.set(close_arr, 1, c02)
+    array.set(close_arr, 2, c03)
+    array.set(close_arr, 3, c04)
+    array.set(close_arr, 4, c05)
+    array.set(close_arr, 5, c06)
+    array.set(close_arr, 6, c07)
+    array.set(close_arr, 7, c08)
+    array.set(close_arr, 8, c09)
+    array.set(close_arr, 9, c10)
+    
+    array.set(w_vwap_arr, 0, w_vwap01), array.set(w_vah_arr, 0, w_vah01), array.set(w_val_arr, 0, w_val01)
+    array.set(w_prev_vwap_arr, 0, w_prev_vwap01), array.set(w_prev_vah_arr, 0, w_prev_vah01), array.set(w_prev_val_arr, 0, w_prev_val01)
+    array.set(w_vwap_arr, 1, w_vwap02), array.set(w_vah_arr, 1, w_vah02), array.set(w_val_arr, 1, w_val02)
+    array.set(w_prev_vwap_arr, 1, w_prev_vwap02), array.set(w_prev_vah_arr, 1, w_prev_vah02), array.set(w_prev_val_arr, 1, w_prev_val02)
+    array.set(w_vwap_arr, 2, w_vwap03), array.set(w_vah_arr, 2, w_vah03), array.set(w_val_arr, 2, w_val03)
+    array.set(w_prev_vwap_arr, 2, w_prev_vwap03), array.set(w_prev_vah_arr, 2, w_prev_vah03), array.set(w_prev_val_arr, 2, w_prev_val03)
+    array.set(w_vwap_arr, 3, w_vwap04), array.set(w_vah_arr, 3, w_vah04), array.set(w_val_arr, 3, w_val04)
+    array.set(w_prev_vwap_arr, 3, w_prev_vwap04), array.set(w_prev_vah_arr, 3, w_prev_vah04), array.set(w_prev_val_arr, 3, w_prev_val04)
+    array.set(w_vwap_arr, 4, w_vwap05), array.set(w_vah_arr, 4, w_vah05), array.set(w_val_arr, 4, w_val05)
+    array.set(w_prev_vwap_arr, 4, w_prev_vwap05), array.set(w_prev_vah_arr, 4, w_prev_vah05), array.set(w_prev_val_arr, 4, w_prev_val05)
+    array.set(w_vwap_arr, 5, w_vwap06), array.set(w_vah_arr, 5, w_vah06), array.set(w_val_arr, 5, w_val06)
+    array.set(w_prev_vwap_arr, 5, w_prev_vwap06), array.set(w_prev_vah_arr, 5, w_prev_vah06), array.set(w_prev_val_arr, 5, w_prev_val06)
+    array.set(w_vwap_arr, 6, w_vwap07), array.set(w_vah_arr, 6, w_vah07), array.set(w_val_arr, 6, w_val07)
+    array.set(w_prev_vwap_arr, 6, w_prev_vwap07), array.set(w_prev_vah_arr, 6, w_prev_vah07), array.set(w_prev_val_arr, 6, w_prev_val07)
+    array.set(w_vwap_arr, 7, w_vwap08), array.set(w_vah_arr, 7, w_vah08), array.set(w_val_arr, 7, w_val08)
+    array.set(w_prev_vwap_arr, 7, w_prev_vwap08), array.set(w_prev_vah_arr, 7, w_prev_vah08), array.set(w_prev_val_arr, 7, w_prev_val08)
+    array.set(w_vwap_arr, 8, w_vwap09), array.set(w_vah_arr, 8, w_vah09), array.set(w_val_arr, 8, w_val09)
+    array.set(w_prev_vwap_arr, 8, w_prev_vwap09), array.set(w_prev_vah_arr, 8, w_prev_vah09), array.set(w_prev_val_arr, 8, w_prev_val09)
+    array.set(w_vwap_arr, 9, w_vwap10), array.set(w_vah_arr, 9, w_vah10), array.set(w_val_arr, 9, w_val10)
+    array.set(w_prev_vwap_arr, 9, w_prev_vwap10), array.set(w_prev_vah_arr, 9, w_prev_vah10), array.set(w_prev_val_arr, 9, w_prev_val10)
+    
+    array.set(m_vwap_arr, 0, m_vwap01), array.set(m_vah_arr, 0, m_vah01), array.set(m_val_arr, 0, m_val01)
+    array.set(m_prev_vwap_arr, 0, m_prev_vwap01), array.set(m_prev_vah_arr, 0, m_prev_vah01), array.set(m_prev_val_arr, 0, m_prev_val01)
+    array.set(m_vwap_arr, 1, m_vwap02), array.set(m_vah_arr, 1, m_vah02), array.set(m_val_arr, 1, m_val02)
+    array.set(m_prev_vwap_arr, 1, m_prev_vwap02), array.set(m_prev_vah_arr, 1, m_prev_vah02), array.set(m_prev_val_arr, 1, m_prev_val02)
+    array.set(m_vwap_arr, 2, m_vwap03), array.set(m_vah_arr, 2, m_vah03), array.set(m_val_arr, 2, m_val03)
+    array.set(m_prev_vwap_arr, 2, m_prev_vwap03), array.set(m_prev_vah_arr, 2, m_prev_vah03), array.set(m_prev_val_arr, 2, m_prev_val03)
+    array.set(m_vwap_arr, 3, m_vwap04), array.set(m_vah_arr, 3, m_vah04), array.set(m_val_arr, 3, m_val04)
+    array.set(m_prev_vwap_arr, 3, m_prev_vwap04), array.set(m_prev_vah_arr, 3, m_prev_vah04), array.set(m_prev_val_arr, 3, m_prev_val04)
+    array.set(m_vwap_arr, 4, m_vwap05), array.set(m_vah_arr, 4, m_vah05), array.set(m_val_arr, 4, m_val05)
+    array.set(m_prev_vwap_arr, 4, m_prev_vwap05), array.set(m_prev_vah_arr, 4, m_prev_vah05), array.set(m_prev_val_arr, 4, m_prev_val05)
+    array.set(m_vwap_arr, 5, m_vwap06), array.set(m_vah_arr, 5, m_vah06), array.set(m_val_arr, 5, m_val06)
+    array.set(m_prev_vwap_arr, 5, m_prev_vwap06), array.set(m_prev_vah_arr, 5, m_prev_vah06), array.set(m_prev_val_arr, 5, m_prev_val06)
+    array.set(m_vwap_arr, 6, m_vwap07), array.set(m_vah_arr, 6, m_vah07), array.set(m_val_arr, 6, m_val07)
+    array.set(m_prev_vwap_arr, 6, m_prev_vwap07), array.set(m_prev_vah_arr, 6, m_prev_vah07), array.set(m_prev_val_arr, 6, m_prev_val07)
+    array.set(m_vwap_arr, 7, m_vwap08), array.set(m_vah_arr, 7, m_vah08), array.set(m_val_arr, 7, m_val08)
+    array.set(m_prev_vwap_arr, 7, m_prev_vwap08), array.set(m_prev_vah_arr, 7, m_prev_vah08), array.set(m_prev_val_arr, 7, m_prev_val08)
+    array.set(m_vwap_arr, 8, m_vwap09), array.set(m_vah_arr, 8, m_vah09), array.set(m_val_arr, 8, m_val09)
+    array.set(m_prev_vwap_arr, 8, m_prev_vwap09), array.set(m_prev_vah_arr, 8, m_prev_vah09), array.set(m_prev_val_arr, 8, m_prev_val09)
+    array.set(m_vwap_arr, 9, m_vwap10), array.set(m_vah_arr, 9, m_vah10), array.set(m_val_arr, 9, m_val10)
+    array.set(m_prev_vwap_arr, 9, m_prev_vwap10), array.set(m_prev_vah_arr, 9, m_prev_vah10), array.set(m_prev_val_arr, 9, m_prev_val10)
+    
+    array.set(q_vwap_arr, 0, q_vwap01), array.set(q_vah_arr, 0, q_vah01), array.set(q_val_arr, 0, q_val01)
+    array.set(q_prev_vwap_arr, 0, q_prev_vwap01), array.set(q_prev_vah_arr, 0, q_prev_vah01), array.set(q_prev_val_arr, 0, q_prev_val01)
+    array.set(q_vwap_arr, 1, q_vwap02), array.set(q_vah_arr, 1, q_vah02), array.set(q_val_arr, 1, q_val02)
+    array.set(q_prev_vwap_arr, 1, q_prev_vwap02), array.set(q_prev_vah_arr, 1, q_prev_vah02), array.set(q_prev_val_arr, 1, q_prev_val02)
+    array.set(q_vwap_arr, 2, q_vwap03), array.set(q_vah_arr, 2, q_vah03), array.set(q_val_arr, 2, q_val03)
+    array.set(q_prev_vwap_arr, 2, q_prev_vwap03), array.set(q_prev_vah_arr, 2, q_prev_vah03), array.set(q_prev_val_arr, 2, q_prev_val03)
+    array.set(q_vwap_arr, 3, q_vwap04), array.set(q_vah_arr, 3, q_vah04), array.set(q_val_arr, 3, q_val04)
+    array.set(q_prev_vwap_arr, 3, q_prev_vwap04), array.set(q_prev_vah_arr, 3, q_prev_vah04), array.set(q_prev_val_arr, 3, q_prev_val04)
+    array.set(q_vwap_arr, 4, q_vwap05), array.set(q_vah_arr, 4, q_vah05), array.set(q_val_arr, 4, q_val05)
+    array.set(q_prev_vwap_arr, 4, q_prev_vwap05), array.set(q_prev_vah_arr, 4, q_prev_vah05), array.set(q_prev_val_arr, 4, q_prev_val05)
+    array.set(q_vwap_arr, 5, q_vwap06), array.set(q_vah_arr, 5, q_vah06), array.set(q_val_arr, 5, q_val06)
+    array.set(q_prev_vwap_arr, 5, q_prev_vwap06), array.set(q_prev_vah_arr, 5, q_prev_vah06), array.set(q_prev_val_arr, 5, q_prev_val06)
+    array.set(q_vwap_arr, 6, q_vwap07), array.set(q_vah_arr, 6, q_vah07), array.set(q_val_arr, 6, q_val07)
+    array.set(q_prev_vwap_arr, 6, q_prev_vwap07), array.set(q_prev_vah_arr, 6, q_prev_vah07), array.set(q_prev_val_arr, 6, q_prev_val07)
+    array.set(q_vwap_arr, 7, q_vwap08), array.set(q_vah_arr, 7, q_vah08), array.set(q_val_arr, 7, q_val08)
+    array.set(q_prev_vwap_arr, 7, q_prev_vwap08), array.set(q_prev_vah_arr, 7, q_prev_vah08), array.set(q_prev_val_arr, 7, q_prev_val08)
+    array.set(q_vwap_arr, 8, q_vwap09), array.set(q_vah_arr, 8, q_vah09), array.set(q_val_arr, 8, q_val09)
+    array.set(q_prev_vwap_arr, 8, q_prev_vwap09), array.set(q_prev_vah_arr, 8, q_prev_vah09), array.set(q_prev_val_arr, 8, q_prev_val09)
+    array.set(q_vwap_arr, 9, q_vwap10), array.set(q_vah_arr, 9, q_vah10), array.set(q_val_arr, 9, q_val10)
+    array.set(q_prev_vwap_arr, 9, q_prev_vwap10), array.set(q_prev_vah_arr, 9, q_prev_vah10), array.set(q_prev_val_arr, 9, q_prev_val10)
+    
+    array.set(y_vwap_arr, 0, y_vwap01), array.set(y_vah_arr, 0, y_vah01), array.set(y_val_arr, 0, y_val01)
+    array.set(y_prev_vwap_arr, 0, y_prev_vwap01), array.set(y_prev_vah_arr, 0, y_prev_vah01), array.set(y_prev_val_arr, 0, y_prev_val01)
+    array.set(y_vwap_arr, 1, y_vwap02), array.set(y_vah_arr, 1, y_vah02), array.set(y_val_arr, 1, y_val02)
+    array.set(y_prev_vwap_arr, 1, y_prev_vwap02), array.set(y_prev_vah_arr, 1, y_prev_vah02), array.set(y_prev_val_arr, 1, y_prev_val02)
+    array.set(y_vwap_arr, 2, y_vwap03), array.set(y_vah_arr, 2, y_vah03), array.set(y_val_arr, 2, y_val03)
+    array.set(y_prev_vwap_arr, 2, y_prev_vwap03), array.set(y_prev_vah_arr, 2, y_prev_vah03), array.set(y_prev_val_arr, 2, y_prev_val03)
+    array.set(y_vwap_arr, 3, y_vwap04), array.set(y_vah_arr, 3, y_vah04), array.set(y_val_arr, 3, y_val04)
+    array.set(y_prev_vwap_arr, 3, y_prev_vwap04), array.set(y_prev_vah_arr, 3, y_prev_vah04), array.set(y_prev_val_arr, 3, y_prev_val04)
+    array.set(y_vwap_arr, 4, y_vwap05), array.set(y_vah_arr, 4, y_vah05), array.set(y_val_arr, 4, y_val05)
+    array.set(y_prev_vwap_arr, 4, y_prev_vwap05), array.set(y_prev_vah_arr, 4, y_prev_vah05), array.set(y_prev_val_arr, 4, y_prev_val05)
+    array.set(y_vwap_arr, 5, y_vwap06), array.set(y_vah_arr, 5, y_vah06), array.set(y_val_arr, 5, y_val06)
+    array.set(y_prev_vwap_arr, 5, y_prev_vwap06), array.set(y_prev_vah_arr, 5, y_prev_vah06), array.set(y_prev_val_arr, 5, y_prev_val06)
+    array.set(y_vwap_arr, 6, y_vwap07), array.set(y_vah_arr, 6, y_vah07), array.set(y_val_arr, 6, y_val07)
+    array.set(y_prev_vwap_arr, 6, y_prev_vwap07), array.set(y_prev_vah_arr, 6, y_prev_vah07), array.set(y_prev_val_arr, 6, y_prev_val07)
+    array.set(y_vwap_arr, 7, y_vwap08), array.set(y_vah_arr, 7, y_vah08), array.set(y_val_arr, 7, y_val08)
+    array.set(y_prev_vwap_arr, 7, y_prev_vwap08), array.set(y_prev_vah_arr, 7, y_prev_vah08), array.set(y_prev_val_arr, 7, y_prev_val08)
+    array.set(y_vwap_arr, 8, y_vwap09), array.set(y_vah_arr, 8, y_vah09), array.set(y_val_arr, 8, y_val09)
+    array.set(y_prev_vwap_arr, 8, y_prev_vwap09), array.set(y_prev_vah_arr, 8, y_prev_vah09), array.set(y_prev_val_arr, 8, y_prev_val09)
+    array.set(y_vwap_arr, 9, y_vwap10), array.set(y_vah_arr, 9, y_vah10), array.set(y_val_arr, 9, y_val10)
+    array.set(y_prev_vwap_arr, 9, y_prev_vwap10), array.set(y_prev_vah_arr, 9, y_prev_vah10), array.set(y_prev_val_arr, 9, y_prev_val10)
+
+if barstate.islast
+    table.cell(dashboard, 0, 0, "TICKER", bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 1, 0, "SCORE", bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 2, 0, "PRICE",  bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 3, 0, "ΔWVWAP", bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 4, 0, "ΔMVWAP", bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 5, 0, "ΔQVWAP", bgcolor=color_header_bg, text_color=color_text)
+    table.cell(dashboard, 6, 0, "ΔYVWAP", bgcolor=color_header_bg, text_color=color_text)
+
+    max_score = (w_weight + m_weight + q_weight + y_weight) * (1 + std_weight + prev_weight)
+
+    // build arrays to store normalized scores and symbol indices
+    var int[] sortedIndices = array.new_int(0)
+    var float[] normScores = array.new_float(0)
+    for i = 0 to maxSymbolsToShow - 1
+        c_price = array.get(close_arr, i)
+        ww  = array.get(w_vwap_arr, i)
+        wa  = array.get(w_vah_arr, i)
+        wl  = array.get(w_val_arr, i)
+        wpw = array.get(w_prev_vwap_arr, i)
+        wpa = array.get(w_prev_vah_arr, i)
+        wpl = array.get(w_prev_val_arr, i)
+
+        mw  = array.get(m_vwap_arr, i)
+        ma  = array.get(m_vah_arr, i)
+        ml  = array.get(m_val_arr, i)
+        mpw = array.get(m_prev_vwap_arr, i)
+        mpa = array.get(m_prev_vah_arr, i)
+        mpl = array.get(m_prev_val_arr, i)
+
+        qw  = array.get(q_vwap_arr, i)
+        qa  = array.get(q_vah_arr, i)
+        ql  = array.get(q_val_arr, i)
+        qpw = array.get(q_prev_vwap_arr, i)
+        qpa = array.get(q_prev_vah_arr, i)
+        qpl = array.get(q_prev_val_arr, i)
+
+        yw  = array.get(y_vwap_arr, i)
+        ya  = array.get(y_vah_arr, i)
+        yl  = array.get(y_val_arr, i)
+        ypw = array.get(y_prev_vwap_arr, i)
+        ypa = array.get(y_prev_vah_arr, i)
+        ypl = array.get(y_prev_val_arr, i)
+
+        w_score = calculate_period_score(c_price, ww, wa, wl, wpw, wpa, wpl, w_weight)
+        m_score = calculate_period_score(c_price, mw, ma, ml, mpw, mpa, mpl, m_weight)
+        q_score = calculate_period_score(c_price, qw, qa, ql, qpw, qpa, qpl, q_weight)
+        y_score = calculate_period_score(c_price, yw, ya, yl, ypw, ypa, ypl, y_weight)
+        total_score = w_score + m_score + q_score + y_score
+        normalized_score = (total_score / max_score) * 100
+
+        array.push(sortedIndices, i)
+        array.push(normScores, normalized_score)
+
+    // bubble sort the sortedIndices array based on normScores descending
+    for i = 0 to array.size(sortedIndices) - 2
+        for j = i + 1 to array.size(sortedIndices) - 1
+            idx_i = array.get(sortedIndices, i)
+            idx_j = array.get(sortedIndices, j)
+            score_i = array.get(normScores, idx_i)
+            score_j = array.get(normScores, idx_j)
+            if score_j > score_i
+                temp = array.get(sortedIndices, i)
+                array.set(sortedIndices, i, array.get(sortedIndices, j))
+                array.set(sortedIndices, j, temp)
+
+    // populate the table rows in sorted order (high -> low)
+    for k = 0 to array.size(sortedIndices) - 1
+        idx = array.get(sortedIndices, k)
+        c_price = array.get(close_arr, idx)
+
+        ww  = array.get(w_vwap_arr, idx)
+        wa  = array.get(w_vah_arr, idx)
+        wl  = array.get(w_val_arr, idx)
+        wpw = array.get(w_prev_vwap_arr, idx)
+        wpa = array.get(w_prev_vah_arr, idx)
+        wpl = array.get(w_prev_val_arr, idx)
+
+        mw  = array.get(m_vwap_arr, idx)
+        ma  = array.get(m_vah_arr, idx)
+        ml  = array.get(m_val_arr, idx)
+        mpw = array.get(m_prev_vwap_arr, idx)
+        mpa = array.get(m_prev_vah_arr, idx)
+        mpl = array.get(m_prev_val_arr, idx)
+
+        qw  = array.get(q_vwap_arr, idx)
+        qa  = array.get(q_vah_arr, idx)
+        ql  = array.get(q_val_arr, idx)
+        qpw = array.get(q_prev_vwap_arr, idx)
+        qpa = array.get(q_prev_vah_arr, idx)
+        qpl = array.get(q_prev_val_arr, idx)
+
+        yw  = array.get(y_vwap_arr, idx)
+        ya  = array.get(y_vah_arr, idx)
+        yl  = array.get(y_val_arr, idx)
+        ypw = array.get(y_prev_vwap_arr, idx)
+        ypa = array.get(y_prev_vah_arr, idx)
+        ypl = array.get(y_prev_val_arr, idx)
+
+        w_score = calculate_period_score(c_price, ww, wa, wl, wpw, wpa, wpl, w_weight)
+        m_score = calculate_period_score(c_price, mw, ma, ml, mpw, mpa, mpl, m_weight)
+        q_score = calculate_period_score(c_price, qw, qa, ql, qpw, qpa, qpl, q_weight)
+        y_score = calculate_period_score(c_price, yw, ya, yl, ypw, ypa, ypl, y_weight)
+        total_score = w_score + m_score + q_score + y_score
+        normalized_score = (total_score / max_score) * 100
+
+        w_pct = not na(ww) ? (c_price / ww - 1) * 100 : na
+        m_pct = not na(mw) ? (c_price / mw - 1) * 100 : na
+        q_pct = not na(qw) ? (c_price / qw - 1) * 100 : na
+        y_pct = not na(yw) ? (c_price / yw - 1) * 100 : na
+
+        rowIndex = k + 1
+        sym_name = array.get(symbol_arr, idx)
+
+        table.cell(dashboard, 0, rowIndex, sym_name, text_color=color.white)
+        table.cell(dashboard, 1, rowIndex, str.tostring(normalized_score, "#.##"), bgcolor=get_color_for_value(normalized_score), text_color=color.white)
+        table.cell(dashboard, 2, rowIndex, str.tostring(c_price, "#.####"), text_color=color.white)
+        table.cell(dashboard, 3, rowIndex, str.tostring(w_pct, "#.##") + "%", bgcolor=get_color_for_value(w_pct), text_color=color.white)
+        table.cell(dashboard, 4, rowIndex, str.tostring(m_pct, "#.##") + "%", bgcolor=get_color_for_value(m_pct), text_color=color.white)
+        table.cell(dashboard, 5, rowIndex, str.tostring(q_pct, "#.##") + "%", bgcolor=get_color_for_value(q_pct), text_color=color.white)
+        table.cell(dashboard, 6, rowIndex, str.tostring(y_pct, "#.##") + "%", bgcolor=get_color_for_value(y_pct), text_color=color.white)
