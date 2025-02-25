@@ -1,0 +1,72 @@
+//@version=5
+indicator("G143 VWAP Lines", overlay=true)
+
+// Period toggles
+show1D = input.bool(true, "Show Daily VWAP")
+show1W = input.bool(true, "Show Weekly VWAP")
+show1M = input.bool(true, "Show Monthly VWAP")
+show3M = input.bool(false, "Show Quarterly VWAP")
+show12M = input.bool(false, "Show Yearly VWAP")
+
+// Previous value area toggles
+showPrev1D = input.bool(true, "Show Previous Daily Values")
+showPrev1W = input.bool(true, "Show Previous Weekly Values")
+showPrev1M = input.bool(true, "Show Previous Monthly Values")
+showPrev3M = input.bool(false, "Show Previous Quarterly Values")
+showPrev12M = input.bool(false, "Show Previous Yearly Values")
+
+stdev = input.int(1, title="STD")
+
+calcVwapLines(timeframe, show, showPrev, color, prefix) =>
+    t = time(timeframe)
+    start = na(t[1]) or t > t[1]
+    
+    var line pvwapLine = na, var line pupperLine = na, var line plowerLine = na
+    var line cvwapLine = na, var line cupperLine = na, var line clowerLine = na
+    var label pvwapLabel = na, var label pupperLabel = na, var label plowerLabel = na
+    var label cvwapLabel = na, var label cupperLabel = na, var label clowerLabel = na
+    var int prevStartBarIndex = na
+    var int currStartBarIndex = na
+    
+    pvwap = float(na), pupper = float(na), plower = float(na)
+    
+    [vwap, upper, lower] = ta.vwap(close, start, stdev)
+    
+    if start
+        prevStartBarIndex := currStartBarIndex
+        currStartBarIndex := bar_index
+    
+    pvwap := start ? vwap[1] : pvwap[1]
+    pupper := start ? upper[1] : pupper[1]
+    plower := start ? lower[1] : plower[1]
+    
+    if show and barstate.islast
+        line.delete(pvwapLine), line.delete(pupperLine), line.delete(plowerLine)
+        line.delete(cvwapLine), line.delete(cupperLine), line.delete(clowerLine)
+        label.delete(pvwapLabel), label.delete(pupperLabel), label.delete(plowerLabel)
+        label.delete(cvwapLabel), label.delete(cupperLabel), label.delete(clowerLabel)
+        
+        // Draw previous period lines only if showPrev is true
+        if showPrev
+            pvwapLine := line.new(x1=prevStartBarIndex, y1=pvwap, x2=bar_index+50, y2=pvwap, extend=extend.none, style=line.style_solid, color=color.blue)
+            pupperLine := line.new(x1=prevStartBarIndex, y1=pupper, x2=bar_index+50, y2=pupper, extend=extend.none, style=line.style_solid, color=color)
+            plowerLine := line.new(x1=prevStartBarIndex, y1=plower, x2=bar_index+50, y2=plower, extend=extend.none, style=line.style_solid, color=color)
+            
+            pvwapLabel := label.new(x=bar_index+50, y=pvwap, text="p" + prefix + "VWAP", color=color, style=label.style_none, textcolor=color)
+            pupperLabel := label.new(x=bar_index+50, y=pupper, text="p" + prefix + "VAH", color=color, style=label.style_none, textcolor=color)
+            plowerLabel := label.new(x=bar_index+50, y=plower, text="p" + prefix + "VAL", color=color, style=label.style_none, textcolor=color)
+        
+        // Current period lines
+        cvwapLine := line.new(x1=currStartBarIndex, y1=vwap, x2=bar_index+50, y2=vwap, extend=extend.none, style=line.style_solid, color=color.blue)
+        cupperLine := line.new(x1=currStartBarIndex, y1=upper, x2=bar_index+50, y2=upper, extend=extend.none, style=line.style_solid, color=color)
+        clowerLine := line.new(x1=currStartBarIndex, y1=lower, x2=bar_index+50, y2=lower, extend=extend.none, style=line.style_solid, color=color)
+        
+        cvwapLabel := label.new(x=bar_index+50, y=vwap, text= prefix + "VWAP", color=color, style=label.style_none, textcolor=color.white)
+        cupperLabel := label.new(x=bar_index+50, y=upper, text= prefix + "VAH", color=color, style=label.style_none, textcolor=color)
+        clowerLabel := label.new(x=bar_index+50, y=lower, text= prefix + "VAL", color=color, style=label.style_none, textcolor=color)
+
+calcVwapLines("1D", show1D, showPrev1D, color.white, "d")
+calcVwapLines("1W", show1W, showPrev1W, color.white, "w")
+calcVwapLines("1M", show1M, showPrev1M, color.white, "m")
+calcVwapLines("3M", show3M, showPrev3M, color.white, "q")
+calcVwapLines("12M", show12M, showPrev12M, color.white, "y")
