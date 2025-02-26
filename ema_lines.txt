@@ -1,0 +1,44 @@
+//@version=5
+indicator("G143 EMA Lines", overlay=true)
+
+// EMA toggles
+show_ema1 = input.bool(true, "Show EMA 1")
+show_ema2 = input.bool(true, "Show EMA 2")
+show_ema3 = input.bool(true, "Show EMA 3")
+show_ema4 = input.bool(false, "Show EMA 4")
+show_ema5 = input.bool(false, "Show EMA 5")
+
+// EMA lengths
+ema1_length = input.int(20, "EMA 1 Length", minval=1)
+ema2_length = input.int(50, "EMA 2 Length", minval=1)
+ema3_length = input.int(100, "EMA 3 Length", minval=1)
+ema4_length = input.int(200, "EMA 4 Length", minval=1)
+ema5_length = input.int(500, "EMA 5 Length", minval=1)
+
+// EMA colors
+ema1_color = input.color(color.rgb(255, 255, 255), "EMA 1 Color")
+ema2_color = input.color(color.rgb(255, 255, 255), "EMA 2 Color")
+ema3_color = input.color(color.rgb(255, 255, 255), "EMA 3 Color")
+ema4_color = input.color(color.rgb(255, 255, 255), "EMA 4 Color")
+ema5_color = input.color(color.rgb(255, 255, 255), "EMA 5 Color")
+
+calcEmaLine(show, length, color, prefix) =>
+    var line emaLine = na
+    var label emaLabel = na
+    
+    // Calculate EMA
+    ema_val = ta.ema(close, length)
+    
+    if show and barstate.islast
+        line.delete(emaLine)
+        label.delete(emaLabel)
+        
+        // Draw horizontal line at current EMA value
+        emaLine := line.new(x1=bar_index - 50, y1=ema_val, x2=bar_index + 50, y2=ema_val, extend=extend.none, style=line.style_solid, color=color)
+        emaLabel := label.new(x=bar_index + 50, y=ema_val, text=" EMA(" + str.tostring(length) + ")", color=color, style=label.style_none, textcolor=color.white)
+
+calcEmaLine(show_ema1, ema1_length, ema1_color, "1")
+calcEmaLine(show_ema2, ema2_length, ema2_color, "2")
+calcEmaLine(show_ema3, ema3_length, ema3_color, "3")
+calcEmaLine(show_ema4, ema4_length, ema4_color, "4")
+calcEmaLine(show_ema5, ema5_length, ema5_color, "5")
