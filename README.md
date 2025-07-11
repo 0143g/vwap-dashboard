@@ -4,5 +4,3 @@ uses weekly, monthly, quarterly, yearly anchored vwaps to compute a trend scores
 
 ### VWAP / EMA LINES
 plots the anchored vwap / ema values as horizontal lines on the chart. nice to see where they cluster up imo.
-
-@143gojo on twitter, lmk if you have questions (can't guarantee i'll answer tho).
